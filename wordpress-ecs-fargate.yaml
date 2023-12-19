@@ -530,6 +530,7 @@ Resources:
         AutoPause: true
         MinCapacity: 2  # Adjust based on your needs
         MaxCapacity: 4  # Adjust based on your needs
+      DBSubnetGroupName: !Ref DBSubnetGroup
       VpcSecurityGroupIds:
         - !Ref DBSecurityGroup
 
@@ -597,7 +598,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 8080
       ToPort: 8080
-      SourceSecurityGroupId: !Ref ALBSecurityGroup
+      CidrIp: "0.0.0.0/0"
 
   WordPressService:
     Type: AWS::ECS::Service
@@ -667,6 +668,52 @@ Resources:
             AuthorizationConfig:
               AccessPointId: !Ref AccessPoint
               IAM: "DISABLED"
+
+  ECSServiceScalableTarget:
+    Type: "AWS::ApplicationAutoScaling::ScalableTarget"
+    DependsOn: ECSTaskDefinition
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 1
+      ResourceId: !Sub "service/wordpress/wof-efs-rw-service"
+      RoleARN: !GetAtt ScalingRole.Arn
+      ScalableDimension: "ecs:service:DesiredCount"
+      ServiceNamespace: "ecs"
+
+  ECSServiceScalingPolicy:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: "cpu75-target-tracking-scaling-policy"
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref ECSServiceScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75.0
+
+  ScalingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "application-autoscaling.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "ScalingPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ecs:UpdateService"
+                  - "ecs:DescribeServices"
+                Resource: "*"  # Adjust as needed
+
 
 Outputs:
 
