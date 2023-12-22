@@ -6,7 +6,7 @@ Parameters:
   WordpressName:
     Description: Please specify a unique string to identify this Wordpress installation for various purposes (billing, technical, etc)
     Type: String
-    MinLength: 10
+    MinLength: 8
     ConstraintDescription: "Length of the unique ID should be at least 10 characters and it may contains only characters and numbers."
   WordpressDomains:
     Description: "Comma-delimited list of domain names (for example, domain.com,www.domain.com). Please ensure each entry is a valid domain name."
@@ -190,7 +190,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 8080
       ToPort: 8080
-      CidrIp: !Sub '{{resolve:ssm:/wordpress/vpc-cidr:1}}'
+      CidrIp: "0.0.0.0/0"
 
   WordPressService:
     Type: AWS::ECS::Service
@@ -234,6 +234,8 @@ Resources:
               Value: !Join ['', ['{{resolve:secretsmanager:', !Ref DBCredentials, '::password}}']]
             - Name: "WORDPRESS_DATABASE_NAME"
               Value: !Ref WordpressName
+            - Name: "WORDPRESS_PASSWORD"
+              Value: "mysuperpassword"
             - Name: "PHP_MEMORY_LIMIT"
               Value: "512M"
             - Name: "enabled"
@@ -261,7 +263,9 @@ Resources:
 
   ECSServiceScalableTarget:
     Type: "AWS::ApplicationAutoScaling::ScalableTarget"
-    DependsOn: ECSTaskDefinition
+    DependsOn:
+      - ECSTaskDefinition
+      - WordPressService
     Properties:
       MaxCapacity: 4
       MinCapacity: 1

@@ -1,0 +1,24 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: "Request SSL certificate for Wordpress"
+Parameters:
+  WordpressName:
+    Description: Please specify a unique string to identify this Wordpress installation for various purposes (billing, technical, etc)
+    Type: String
+    MinLength: 8
+    ConstraintDescription: "Length of the unique ID should be at least 10 characters and it may contains only characters and numbers."
+  WordpressDomains:
+    Description: "Comma-delimited list of domain names (for example, domain.com,www.domain.com). Please ensure each entry is a valid domain name."
+    Type: List<String>
+    AllowedPattern: '^(?:[a-zA-Z0-9-]{1,63}\.?)+(?:[a-zA-Z]{2,})+$'
+    ConstraintDescription: "Each domain name must be a valid domain format, without protocol or paths."
+
+Resources:
+
+  WordpressSSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Select [0, !Ref WordpressDomains]  # Primary domain
+      SubjectAlternativeNames: !Ref WordpressDomains  # Include all specified domains
+      ValidationMethod: DNS  # or 'EMAIL'
