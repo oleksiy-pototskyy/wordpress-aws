@@ -1,0 +1,306 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: "Deploy Wordpress based on AWS ALB + AWS ECS Fargate + AWS RDS Serverless mySQL + EFS"
+Parameters:
+  WordpressName:
+    Description: Please specify a unique string to identify this Wordpress installation for various purposes (billing, technical, etc)
+    Type: String
+    MinLength: 10
+    ConstraintDescription: "Length of the unique ID should be at least 10 characters and it may contains only characters and numbers."
+  WordpressDomains:
+    Description: "Comma-delimited list of domain names (for example, domain.com,www.domain.com). Please ensure each entry is a valid domain name."
+    Type: List<String>
+    AllowedPattern: '^(?:[a-zA-Z0-9-]{1,63}\.?)+(?:[a-zA-Z]{2,})+$'
+    ConstraintDescription: "Each domain name must be a valid domain format, without protocol or paths."
+  WordpressFromEmail:
+    Description: "Email address for Wordpress Email From field"
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    ConstraintDescription: "The email address must be in a standard email format (e.g., user@domain.com)."
+  ResponsibleForDNSRecordsEmail:
+    Description: "Please provide the email address of the person responsible for DNS record modifications in the Wordpress domain names."
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    ConstraintDescription: "The email address must be in a standard email format (e.g., user@domain.com)."
+  DBPerformanceMinCapacityACU:
+    Description: "This is the minimum capacity of the Aurora Serverless DB cluster, expressed in Aurora Capacity Units (ACUs). Each ACU is a combination of processing and memory capacity."
+    Type: Number
+    Default: 1
+  DBPerformanceMaxCapacityACU:
+    Description: "This is the maximum capacity of the Aurora Serverless DB cluster in ACUs. The database will automatically scale up to this level as needed. Each ACU is a combination of processing and memory capacity."
+    Type: Number
+    Default: 4
+
+Resources:
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: Wordpress
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+
+  MountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: FileSystem Security Group
+      VpcId: !Sub '{{resolve:ssm:/wordpress/vpc-id:1}}'
+      GroupName: Wordpress-EFS-SG
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !Sub '{{resolve:ssm:/wordpress/vpc-cidr:1}}'
+
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Sub '{{resolve:ssm:/wordpress/vpc-private-subnet-id-0:1}}'
+      SecurityGroups:
+        - !Ref MountTargetSecurityGroup
+
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Sub '{{resolve:ssm:/wordpress/vpc-private-subnet-id-1:1}}'
+      SecurityGroups:
+        - !Ref MountTargetSecurityGroup
+
+  AccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref FileSystem
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        CreationInfo:
+          OwnerGid: "1000"
+          OwnerUid: "1000"
+          Permissions: "0777"
+        Path: "/bitnami"
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS Security Group
+      VpcId: !Sub '{{resolve:ssm:/wordpress/vpc-id:1}}'
+      GroupName: Wordpress-RDS-SG
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Sub '{{resolve:ssm:/wordpress/vpc-cidr:1}}'
+
+  DBCredentials:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Join ['', ['wordpress-db-', !Ref WordpressName]]
+      Description: 'This is a credentials for Aurora MySQL serverless database'
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${WordpressName}"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\'
+
+  WordpressAuroraDBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-mysql
+      EngineMode: serverless
+      DBClusterIdentifier: !Ref WordpressName
+      MasterUsername: !Ref WordpressName
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref DBCredentials, '::password}}']]
+      DatabaseName: !Ref WordpressName
+      ScalingConfiguration:
+        AutoPause: true
+        MinCapacity: !Ref DBPerformanceMinCapacityACU
+        MaxCapacity: !Ref DBPerformanceMaxCapacityACU
+      DBSubnetGroupName: !Sub '{{resolve:ssm:/wordpress/vpc-db-subnet-group:1}}'
+      VpcSecurityGroupIds:
+        - !Ref DBSecurityGroup
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB Security Group
+      VpcId: !Sub '{{resolve:ssm:/wordpress/vpc-id:1}}'
+      GroupName: Wordpress-ALB-SG
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  WordPressALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: wof-load-balancer
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Sub '{{resolve:ssm:/wordpress/vpc-public-subnet-id-0:1}}'
+        - !Sub '{{resolve:ssm:/wordpress/vpc-public-subnet-id-1:1}}'
+
+  WordPressTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: WordPressTargetGroup
+      TargetType: ip
+      Port: 8080
+      Protocol: HTTP
+      HealthCheckPort: 8080
+      VpcId: !Sub '{{resolve:ssm:/wordpress/vpc-id:1}}'
+
+  WordPressALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref WordPressALB
+      Protocol: "HTTP"
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref WordPressTargetGroup
+                Weight: 1
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: "wordpress"
+
+  WordPressServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Svc-WordPress-on-Fargate"
+      GroupName: "Svc-WordPress-on-Fargate"
+      VpcId: !Sub '{{resolve:ssm:/wordpress/vpc-id:1}}'
+
+  WordPressServiceSGIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref WordPressServiceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      CidrIp: !Sub '{{resolve:ssm:/wordpress/vpc-cidr:1}}'
+
+  WordPressService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: wof-efs-rw-service
+      TaskDefinition: !Ref ECSTaskDefinition
+      LoadBalancers:
+        - TargetGroupArn: !Ref WordPressTargetGroup
+          ContainerName: wordpress
+          ContainerPort: 8080
+      DesiredCount: 1
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Sub '{{resolve:ssm:/wordpress/vpc-private-subnet-id-0:1}}'
+            - !Sub '{{resolve:ssm:/wordpress/vpc-private-subnet-id-1:1}}'
+          SecurityGroups:
+            - !Ref WordPressServiceSecurityGroup
+          AssignPublicIp: DISABLED
+
+  ECSTaskDefinition:
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      Family: "wof-tutorial"
+      NetworkMode: "awsvpc"
+      ContainerDefinitions:
+        - Name: "wordpress"
+          Image: "bitnami/wordpress"
+          Essential: true
+          Environment:
+            - Name: "MARIADB_HOST"
+              Value: !GetAtt WordpressAuroraDBCluster.Endpoint.Address
+            - Name: "WORDPRESS_DATABASE_USER"
+              Value: !Ref WordpressName
+            - Name: "WORDPRESS_DATABASE_PASSWORD"
+              Value: !Join ['', ['{{resolve:secretsmanager:', !Ref DBCredentials, '::password}}']]
+            - Name: "WORDPRESS_DATABASE_NAME"
+              Value: !Ref WordpressName
+            - Name: "PHP_MEMORY_LIMIT"
+              Value: "512M"
+            - Name: "enabled"
+              Value: "false"
+            - Name: "ALLOW_EMPTY_PASSWORD"
+              Value: "yes"
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: "tcp"
+          MountPoints:
+            - SourceVolume: "wordpress"
+              ContainerPath: "/bitnami/wordpress"
+      RequiresCompatibilities:
+        - "FARGATE"
+      Cpu: "1024"
+      Memory: "3072"
+      Volumes:
+        - Name: "wordpress"
+          EFSVolumeConfiguration:
+            FileSystemId: !Ref FileSystem
+            TransitEncryption: "ENABLED"
+            AuthorizationConfig:
+              AccessPointId: !Ref AccessPoint
+              IAM: "DISABLED"
+
+  ECSServiceScalableTarget:
+    Type: "AWS::ApplicationAutoScaling::ScalableTarget"
+    DependsOn: ECSTaskDefinition
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 1
+      ResourceId: !Sub "service/wordpress/wof-efs-rw-service"
+      RoleARN: !GetAtt ScalingRole.Arn
+      ScalableDimension: "ecs:service:DesiredCount"
+      ServiceNamespace: "ecs"
+
+  ECSServiceScalingPolicy:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: "cpu75-target-tracking-scaling-policy"
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref ECSServiceScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75.0
+
+  ScalingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "application-autoscaling.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "ScalingPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ecs:UpdateService"
+                  - "ecs:DescribeServices"
+                Resource: "*"  # Adjust as needed
+
