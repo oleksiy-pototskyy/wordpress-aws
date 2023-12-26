@@ -22,3 +22,10 @@ Resources:
       DomainName: !Select [0, !Ref WordpressDomains]  # Primary domain
       SubjectAlternativeNames: !Ref WordpressDomains  # Include all specified domains
       ValidationMethod: DNS  # or 'EMAIL'
+
+Outputs:
+  SslCertificateArn:
+    Description: The ARN of the SSL certificate
+    Value: !Ref WordpressSSLCertificate
+    Export:
+      Name: !Sub "${AWS::StackName}-SslCertificateArn"

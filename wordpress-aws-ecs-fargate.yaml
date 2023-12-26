@@ -30,7 +30,7 @@ Parameters:
   DBPerformanceMaxCapacityACU:
     Description: "This is the maximum capacity of the Aurora Serverless DB cluster in ACUs. The database will automatically scale up to this level as needed. Each ACU is a combination of processing and memory capacity."
     Type: Number
-    Default: 4
+    Default: 5
 
 Resources:
 
@@ -137,6 +137,10 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+        - IpProtocol: "tcp"
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
 
   WordPressALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -158,18 +162,17 @@ Resources:
       HealthCheckPort: 8080
       VpcId: !Sub '{{resolve:ssm:/wordpress/vpc-id:1}}'
 
-  WordPressALBListener:
+  WordPressALBHttpsListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref WordPressALB
-      Protocol: "HTTP"
-      Port: 80
+      Protocol: HTTPS
+      Port: 443
+      Certificates:
+        - CertificateArn: !ImportValue "wp-pototskyy-net-SslCertificateArn"
       DefaultActions:
         - Type: forward
-          ForwardConfig:
-            TargetGroups:
-              - TargetGroupArn: !Ref WordPressTargetGroup
-                Weight: 1
+          TargetGroupArn: !Ref WordPressTargetGroup
 
   ECSCluster:
     Type: AWS::ECS::Cluster
@@ -308,3 +311,40 @@ Resources:
                   - "ecs:DescribeServices"
                 Resource: "*"  # Adjust as needed
 
+  WordpressCloudFront:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: WordPress CloudFront Distribution
+        Aliases: !Ref WordpressDomains
+        PriceClass: PriceClass_100
+        DefaultCacheBehavior:
+          TargetOriginId: "WordPressALBOrigin"
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
+        Origins:
+          - DomainName: !GetAtt WordPressALB.DNSName
+            Id: "WordPressALBOrigin"
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+        ViewerCertificate:
+          AcmCertificateArn: !ImportValue "wp-pototskyy-net-SslCertificateArn"
+          SslSupportMethod: sni-only
