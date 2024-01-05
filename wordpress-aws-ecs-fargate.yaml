@@ -30,7 +30,7 @@ Parameters:
   DBPerformanceMaxCapacityACU:
     Description: "This is the maximum capacity of the Aurora Serverless DB cluster in ACUs. The database will automatically scale up to this level as needed. Each ACU is a combination of processing and memory capacity."
     Type: Number
-    Default: 5
+    Default: 4
 
 Resources:
 
