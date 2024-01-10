@@ -3,7 +3,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 
 Description: "Deploy Wordpress based on AWS ALB + AWS ECS Fargate + AWS RDS Serverless mySQL + EFS"
 Parameters:
-  WordpressName:
+  ProjectName:
     Description: Please specify a unique string to identify this Wordpress installation for various purposes (billing, technical, etc)
     Type: String
     MinLength: 8
@@ -101,7 +101,7 @@ Resources:
   DBCredentials:
     Type: 'AWS::SecretsManager::Secret'
     Properties:
-      Name: !Join ['', ['wordpress-db-', !Ref WordpressName]]
+      Name: !Join ['', ['wordpress-db-', !Ref ProjectName]]
       Description: 'This is a credentials for Aurora MySQL serverless database'
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${WordpressName}"}'
@@ -114,10 +114,10 @@ Resources:
     Properties:
       Engine: aurora-mysql
       EngineMode: serverless
-      DBClusterIdentifier: !Ref WordpressName
-      MasterUsername: !Ref WordpressName
+      DBClusterIdentifier: !Ref ProjectName
+      MasterUsername: !Ref ProjectName
       MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref DBCredentials, '::password}}']]
-      DatabaseName: !Ref WordpressName
+      DatabaseName: !Ref ProjectName
       ScalingConfiguration:
         AutoPause: true
         MinCapacity: !Ref DBPerformanceMinCapacityACU
@@ -232,11 +232,11 @@ Resources:
             - Name: "MARIADB_HOST"
               Value: !GetAtt WordpressAuroraDBCluster.Endpoint.Address
             - Name: "WORDPRESS_DATABASE_USER"
-              Value: !Ref WordpressName
+              Value: !Ref ProjectName
             - Name: "WORDPRESS_DATABASE_PASSWORD"
               Value: !Join ['', ['{{resolve:secretsmanager:', !Ref DBCredentials, '::password}}']]
             - Name: "WORDPRESS_DATABASE_NAME"
-              Value: !Ref WordpressName
+              Value: !Ref ProjectName
             - Name: "WORDPRESS_PASSWORD"
               Value: "mysuperpassword"
             - Name: "PHP_MEMORY_LIMIT"

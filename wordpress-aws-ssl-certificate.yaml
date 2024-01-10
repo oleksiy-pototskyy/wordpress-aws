@@ -3,7 +3,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 
 Description: "Request SSL certificate for Wordpress"
 Parameters:
-  WordpressName:
+  ProjectName:
     Description: Please specify a unique string to identify this Wordpress installation for various purposes (billing, technical, etc)
     Type: String
     MinLength: 8

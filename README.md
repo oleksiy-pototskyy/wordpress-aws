@@ -65,8 +65,8 @@ AWS CloudFormation templates automatically add TAG **project** with appropriate 
 
 #### Activate the Tag:
 - Navigate to 'Cost Allocation Tags'.
-- Under 'User-Defined Cost Allocation Tags', find the project tag.
-- Select the tag and click 'Activate'.
+- Under 'User-Defined Cost Allocation Tags', find the **project** tag.
+- Select the **project** tag and click 'Activate'.
 
 ### Step 3: Creating a Cost Report by Project Tag
 
@@ -75,7 +75,7 @@ AWS CloudFormation templates automatically add TAG **project** with appropriate 
 
 #### Create a New Report:
 - Click on 'Create a new report'.
-- Choose the type of report (e.g., 'Costs').
+- Choose the type of report (e.g., 'Costs and usage').
 - Under 'Group by', select 'Tag' and choose the project tag.
 - Configure other report settings as needed.
 - Save and view the report.
